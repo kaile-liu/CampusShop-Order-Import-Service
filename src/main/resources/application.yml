@@ -1,0 +1,27 @@
+spring:
+  application:
+    name: order-import-service
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+
+server:
+  port: ${SERVER_PORT:8080}
+
+app:
+  storage:
+    # Path to the JSON order store. Overridable via env var or --app.storage.file
+    file: ${ORDER_STORAGE_FILE:./data/orders.json}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: never
+
+logging:
+  level:
+    de.campusshop.cw1: INFO

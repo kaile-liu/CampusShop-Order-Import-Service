@@ -1,0 +1,19 @@
+# Local convenience stack for CW1.
+#
+#   docker compose up --build
+#
+# uses local file persistence only. The orders.json file is kept in a named volume so data survives container restarts.
+services:
+  order-import-service:
+    build: .
+    image: ilp:cw1
+    ports:
+      - "8080:8080"
+    environment:
+      - ORDER_STORAGE_FILE=/app/data/orders.json
+      - SERVER_PORT=8080
+    volumes:
+      - order-data:/app/data
+
+volumes:
+  order-data:

@@ -1,0 +1,156 @@
+# Order Import Service — IntelliJ HTTP Client requests
+#   - Start the service: `./mvnw spring-boot:run`, or `docker compose up --build`
+#   - Each request has a response handler ( > {% ... %} ) that asserts the
+#     expected status/body, so positive AND negative tests self-check.
+# Note: enforces externalOrderId uniqueness, so the duplicate test below
+# runs BEFORE the delete test (after deletion the id would be free again).
+
+@baseUrl = http://localhost:8080
+
+###############################################################################
+# POSITIVE / HAPPY PATH
+###############################################################################
+
+### Health check -> 200 UP
+GET {{baseUrl}}/actuator/health
+
+> {%
+client.test("health is UP", function () {
+    client.assert(response.status === 200, "expected 200");
+    client.assert(response.body.status === "UP", "expected status UP");
+});
+%}
+
+### Create an order -> 201 (captures the generated orderId)
+POST {{baseUrl}}/partner-orders
+Content-Type: application/json
+
+{
+  "partnerOrderId": "22222222-2222-4222-8222-222222222222",
+  "buyer": { "id": "33333333-3333-4333-8333-333333333333", "fullName": "Alex Customer", "email": "alex@example.com" },
+  "items": [
+    { "sku": "BOOK-1", "name": "Clean Code", "quantity": 2, "unitPrice": 32.50 },
+    { "sku": "USB-CABLE", "name": "USB-C Cable", "quantity": 1, "unitPrice": 8.99 }
+  ],
+  "sourceSystem": "partner-a"
+}
+
+> {%
+client.test("order created", function () {
+    client.assert(response.status === 201, "expected 201");
+    client.assert(response.body.status === "IMPORTED", "expected IMPORTED");
+    client.assert(response.body.totalAmount === 73.99, "expected total 73.99");
+});
+client.global.set("orderId", response.body.orderId);
+%}
+
+### Duplicate import (same partnerOrderId) -> 409
+POST {{baseUrl}}/partner-orders
+Content-Type: application/json
+
+{
+  "partnerOrderId": "22222222-2222-4222-8222-222222222222",
+  "buyer": { "id": "33333333-3333-4333-8333-333333333333", "fullName": "Alex Customer", "email": "alex@example.com" },
+  "items": [ { "sku": "BOOK-1", "name": "Clean Code", "quantity": 1, "unitPrice": 32.50 } ]
+}
+
+> {%
+client.test("duplicate rejected", function () {
+    client.assert(response.status === 409, "expected 409");
+    client.assert(response.body.code === "DUPLICATE_ORDER", "expected DUPLICATE_ORDER");
+});
+%}
+
+### Get the created order -> 200
+GET {{baseUrl}}/orders/{{orderId}}
+
+> {%
+client.test("order retrieved", function () {
+    client.assert(response.status === 200, "expected 200");
+    client.assert(response.body.externalOrderId === "22222222-2222-4222-8222-222222222222", "wrong externalOrderId");
+});
+%}
+
+### List all orders -> 200
+GET {{baseUrl}}/orders
+
+> {%
+client.test("orders listed", function () {
+    client.assert(response.status === 200, "expected 200");
+    client.assert(Array.isArray(response.body), "expected an array");
+});
+%}
+
+### List orders for a customer -> 200
+GET {{baseUrl}}/orders/customer/33333333-3333-4333-8333-333333333333
+
+> {%
+client.test("customer orders listed", function () {
+    client.assert(response.status === 200, "expected 200");
+    client.assert(response.body.length >= 1, "expected at least one order");
+});
+%}
+
+###############################################################################
+# NEGATIVE TESTS
+###############################################################################
+
+### Invalid input (missing buyer, empty items) -> 400
+POST {{baseUrl}}/partner-orders
+Content-Type: application/json
+
+{
+  "partnerOrderId": "22222222-2222-4222-8222-222222222202",
+  "items": []
+}
+
+> {%
+client.test("validation failed", function () {
+    client.assert(response.status === 400, "expected 400");
+    client.assert(response.body.code === "VALIDATION_FAILED", "expected VALIDATION_FAILED");
+});
+%}
+
+### Malformed JSON -> 400
+POST {{baseUrl}}/partner-orders
+Content-Type: application/json
+
+{ "partnerOrderId": "22222222-2222-4222-8222-222222222203", "items": [
+
+> {%
+client.test("malformed rejected", function () {
+    client.assert(response.status === 400, "expected 400");
+});
+%}
+
+### Unknown order -> 404
+GET {{baseUrl}}/orders/00000000-0000-4000-8000-000000000000
+
+> {%
+client.test("unknown order 404", function () {
+    client.assert(response.status === 404, "expected 404");
+    client.assert(response.body.code === "ORDER_NOT_FOUND", "expected ORDER_NOT_FOUND");
+});
+%}
+
+###############################################################################
+# CLEANUP
+###############################################################################
+
+### Delete the created order -> 204
+DELETE {{baseUrl}}/orders/{{orderId}}
+
+> {%
+client.test("order deleted", function () {
+    client.assert(response.status === 204, "expected 204");
+});
+%}
+
+### Get after delete -> 404
+GET {{baseUrl}}/orders/{{orderId}}
+
+> {%
+client.test("order gone", function () {
+    client.assert(response.status === 404, "expected 404");
+});
+%}
